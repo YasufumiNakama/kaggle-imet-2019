@@ -11,6 +11,7 @@ import pandas as pd
 from sklearn.metrics import fbeta_score
 from sklearn.exceptions import UndefinedMetricWarning
 import torch
+import torch.nn.functional as F
 from torch import nn, cuda
 from torch.optim import Adam
 import tqdm
@@ -23,12 +24,64 @@ from .utils import (
     ON_KAGGLE)
 
 
+class FocalLoss(nn.Module):
+    def __init__(self, gamma=2):
+        super().__init__()
+        self.gamma = gamma
+
+    def forward(self, logit, target):
+        target = target.float()
+        max_val = (-logit).clamp(min=0)
+        loss = logit - logit * target + max_val + \
+               ((-max_val).exp() + (-logit - max_val).exp()).log()
+
+        invprobs = F.logsigmoid(-logit * (target * 2.0 - 1.0))
+        loss = (invprobs * self.gamma).exp() * loss
+        if len(loss.size())==2:
+            loss = loss.sum(dim=1)
+        return loss.mean()
+
+
+class FbetaLoss(nn.Module):
+    def __init__(self, beta=1):
+        super(FbetaLoss, self).__init__()
+        self.small_value = 1e-6
+        self.beta = beta
+
+    def forward(self, logits, labels):
+        beta = self.beta
+        batch_size = logits.size()[0]
+        p = F.sigmoid(logits)
+        l = labels
+        num_pos = torch.sum(p, 1) + self.small_value
+        num_pos_hat = torch.sum(l, 1) + self.small_value
+        tp = torch.sum(l * p, 1)
+        precise = tp / num_pos
+        recall = tp / num_pos_hat
+        fs = (1 + beta * beta) * precise * recall / (beta * beta * precise + recall + self.small_value)
+        loss = fs.sum() / batch_size
+        return 1 - loss
+
+
+class CombineLoss(nn.Module):
+    def __init__(self):
+        super(CombineLoss, self).__init__()
+        self.fbeta_loss = FbetaLoss(beta=2)
+        self.bce_loss = nn.BCEWithLogitsLoss(reduction='none')
+
+    def forward(self, logits, labels):
+        loss_beta = self.fbeta_loss(logits, labels)
+        loss_bce = self.bce_loss(logits, labels)
+        return 0.5 * loss_beta + 0.5 * loss_bce
+
+
 def main():
     parser = argparse.ArgumentParser()
     arg = parser.add_argument
     arg('mode', choices=['train', 'validate', 'predict_valid', 'predict_test'])
     arg('run_root')
-    arg('--model', default='resnet50')
+    arg('--model', default='resnet101')
+    arg('--loss', default='bce')
     arg('--pretrained', type=int, default=1)
     arg('--batch-size', type=int, default=64)
     arg('--step', type=int, default=1)
@@ -63,7 +116,16 @@ def main():
             batch_size=args.batch_size,
             num_workers=args.workers,
         )
-    criterion = nn.BCEWithLogitsLoss(reduction='none')
+
+    if args.loss == 'bce':
+        criterion = nn.BCEWithLogitsLoss(reduction='none')
+    elif args.loss == 'focal':
+        criterion = FocalLoss()
+    elif args.loss == 'fbeta':
+        criterion = FbetaLoss(beta=2)
+    elif args.loss == 'combine':
+        criterion = CombineLoss()
+
     model = getattr(models, args.model)(
         num_classes=N_CLASSES, pretrained=args.pretrained)
     use_cuda = cuda.is_available()
@@ -116,9 +178,7 @@ def main():
             workers=args.workers,
         )
         if args.mode == 'predict_valid':
-            predict(model, df=valid_fold, root=train_root,
-                    out_path=run_root / 'val.h5',
-                    **predict_kwargs)
+            predict(model, df=valid_fold, root=train_root, out_path=run_root / 'val.h5', **predict_kwargs)
         elif args.mode == 'predict_test':
             test_root = DATA_ROOT / (
                 'test_sample' if args.use_sample else 'test')
@@ -174,20 +234,29 @@ def train(args, model: nn.Module, criterion, *, params,
         epoch = state['epoch']
         step = state['step']
         best_valid_loss = state['best_valid_loss']
+        # --------------------------
+        best_valid_f2 = state['best_valid_f2']
+        # --------------------------
     else:
         epoch = 1
         step = 0
         best_valid_loss = float('inf')
+        # --------------------------
+        best_valid_f2 = 0
+        # --------------------------
     lr_changes = 0
 
     save = lambda ep: torch.save({
         'model': model.state_dict(),
         'epoch': ep,
         'step': step,
-        'best_valid_loss': best_valid_loss
+        'best_valid_loss': best_valid_loss,
+        # --------------------------
+        'best_valid_f2': best_valid_f2
+        # --------------------------
     }, str(model_path))
 
-    report_each = 10
+    report_each = 10000
     log = run_root.joinpath('train.log').open('at', encoding='utf8')
     valid_losses = []
     lr_reset_epoch = epoch
@@ -228,11 +297,22 @@ def train(args, model: nn.Module, criterion, *, params,
             valid_losses.append(valid_loss)
             if valid_loss < best_valid_loss:
                 best_valid_loss = valid_loss
+                # shutil.copy(str(model_path), str(best_model_path))
+            # --------------------------
+            for k, v in sorted(valid_metrics.items(), key=lambda kv: -kv[1]):
+                if "valid_f2" in k:
+                    th = k
+                    valid_f2 = v
+                    break
+            if best_valid_f2 < valid_f2:
+                best_valid_f2 = valid_f2
                 shutil.copy(str(model_path), str(best_model_path))
+                print(f'Saved best model at Epoch {epoch}, best_valid_f2 {best_valid_f2}, th {th}')
+            # --------------------------
             elif (patience and epoch - lr_reset_epoch > patience and
                   min(valid_losses[-patience:]) > best_valid_loss):
                 # "patience" epochs without improvement
-                lr_changes +=1
+                lr_changes += 1
                 if lr_changes > max_lr_changes:
                     break
                 lr /= 5
@@ -274,7 +354,12 @@ def validation(
 
     metrics = {}
     argsorted = all_predictions.argsort(axis=1)
-    for threshold in [0.05, 0.10, 0.15, 0.20]:
+    # focal
+    # for threshold in [0.25, 0.26, 0.27, 0.28, 0.29, 0.30, 0.31, 0.32, 0.33, 0.34, 0.35]:
+    # combine
+    # for threshold in [0.40, 0.41, 0.42, 0.43, 0.44, 0.45, 0.46, 0.47, 0.48, 0.49, 0.50, 0.51, 0.52, 0.53, 0.54, 0.55]:
+    # bce
+    for threshold in [0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.13, 0.14, 0.15, 0.20, 0.25, 0.30]:
         metrics[f'valid_f2_th_{threshold:.2f}'] = get_score(
             binarize_prediction(all_predictions, threshold, argsorted))
     metrics['valid_loss'] = np.mean(all_losses)
