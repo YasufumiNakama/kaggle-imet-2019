@@ -1,10 +1,12 @@
 import random
 import math
+import numbers
 
 from PIL import Image
+import torchvision.transforms.functional as F
 from torchvision.transforms import (
     ToTensor, Normalize, Compose, Resize, CenterCrop, RandomCrop,
-    RandomHorizontalFlip)
+    RandomHorizontalFlip, RandomResizedCrop, RandomRotation)
 
 
 class RandomSizedCrop:
@@ -52,16 +54,73 @@ class RandomSizedCrop:
         return crop(scale(img))
 
 
+class RandomRotate(object):
+    def __init__(self, degrees, resample=False, expand=False, center=None):
+        if isinstance(degrees, numbers.Number):
+            if degrees < 0:
+                raise ValueError("If degrees is a single number, it must be positive.")
+            self.degrees = (-degrees, degrees)
+        else:
+            if len(degrees) != 2:
+                raise ValueError("If degrees is a sequence, it must be of len 2.")
+            self.degrees = degrees
+
+        self.resample = resample
+        self.expand = expand
+        self.center = center
+
+    @staticmethod
+    def get_params(degrees):
+        angle = random.uniform(degrees[0], degrees[1])
+
+        return angle
+
+    def __call__(self, img):
+        if random.random() < 0.5:
+            angle = self.get_params(self.degrees)
+            return F.rotate(img, angle, self.resample, self.expand, self.center)
+        else:
+            angle = random.uniform(0, 0)
+            return F.rotate(img, angle, self.resample, self.expand, self.center)
+
+    def __repr__(self):
+        format_string = self.__class__.__name__ + '(degrees={0}'.format(self.degrees)
+        format_string += ', resample={0}'.format(self.resample)
+        format_string += ', expand={0}'.format(self.expand)
+        if self.center is not None:
+            format_string += ', center={0}'.format(self.center)
+        format_string += ')'
+        return format_string
+
+
 train_transform = Compose([
+    # RandomRotate((90, 90), expand=True),
     RandomCrop(288),
     RandomHorizontalFlip(),
 ])
 
 
 test_transform = Compose([
+    # RandomRotate((90, 90), expand=True),
     RandomCrop(288),
     RandomHorizontalFlip(),
 ])
+
+
+"""
+train_transform = Compose([
+    # RandomRotate((90, 90), expand=True),
+    RandomResizedCrop(320, scale=(0.6, 1.0), ratio=(9/16, 16/9)),
+    RandomHorizontalFlip(),
+])
+
+
+test_transform = Compose([
+    # RandomRotate((90, 90), expand=True),
+    RandomResizedCrop(320, scale=(0.6, 1.0), ratio=(9/16, 16/9)),
+    RandomHorizontalFlip(),
+])
+"""
 
 
 tensor_transform = Compose([
