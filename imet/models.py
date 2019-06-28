@@ -14,12 +14,40 @@ from .utils import ON_KAGGLE
 
 """
 When you use AdaptiveConcatPool2d:
+
 (Before)
     self.net.avg_pool = AvgPool()
     self.net.last_linear = nn.Linear(self.net.last_linear.in_features, num_classes)
 (After)
     self.net.avg_pool = AdaptiveConcatPool2d(1)
     self.net.last_linear = nn.Linear(self.net.last_linear.in_features * 2, num_classes)
+    
+When you try 2nd-train:
+
+os.makedirs('../input/se_resnext50_32x4d')
+# 1st-train lr=1e-4
+# shutil.copy('../input/pytorch-pretrained-seresnet/se_resnext50_32x4d-a260b3a4.pth', '../input/se_resnext50_32x4d/se_resnext50_32x4d.pth')
+# 2nd-train & adjust lr=1e-5
+shutil.copy('../input/imet-weights/SEResNeXt50_32x4d_RandomRotate_1st_v42.pt', '../input/se_resnext50_32x4d/se_resnext50_32x4d.pth')
+
+class SEResNeXt50_32x4d(nn.Module):
+    def __init__(self, num_classes, pretrained=False, dropout=False, net_cls=None):
+        super().__init__()
+        self.net = SENet(SEResNeXtBottleneck, [3,4,6,3], groups=32, reduction=16,
+                         dropout_p=None, inplanes=64, input_3x3=False,
+                         downsample_kernel_size=1, downsample_padding=0,
+                         num_classes=1000)
+        weights_path = f'../input/se_resnext50_32x4d/se_resnext50_32x4d.pth'
+        #self.net.load_state_dict(torch.load(weights_path))
+        self.net.avg_pool = AvgPool()
+        self.net.last_linear = nn.Linear(self.net.last_linear.in_features, num_classes)
+        self.load_state_dict(torch.load(weights_path)['model'])
+
+    def fresh_params(self):
+        return self.net.last_linear.parameters()
+
+    def forward(self, x):
+        return self.net(x)
 """
 
 

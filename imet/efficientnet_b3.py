@@ -434,6 +434,9 @@ class Efficientnetb3(nn.Module):
         super().__init__()
         self.net = EfficientNet.from_pretrained('efficientnet-b3')
         self.net._fc = nn.Linear(self.net._fc.in_features, num_classes)
+        # for 2nd-training
+        # weights_path = '../input/efficientnet/efficientnet-b3-1st.pth'
+        # self.load_state_dict(torch.load(weights_path)['model'])
 
     def fresh_params(self):
         return self.net._fc.parameters()
