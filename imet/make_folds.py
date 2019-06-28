@@ -8,13 +8,13 @@ import tqdm
 from .dataset import DATA_ROOT
 
 
-def make_folds(n_folds: int) -> pd.DataFrame:
+def make_folds(n_folds: int, seed: int) -> pd.DataFrame:
     df = pd.read_csv(DATA_ROOT / 'train.csv')
     cls_counts = Counter(cls for classes in df['attribute_ids'].str.split()
                          for cls in classes)
     fold_cls_counts = defaultdict(int)
     folds = [-1] * len(df)
-    for item in tqdm.tqdm(df.sample(frac=1, random_state=42).itertuples(),
+    for item in tqdm.tqdm(df.sample(frac=1, random_state=seed).itertuples(),
                           total=len(df)):
         cls = min(item.attribute_ids.split(), key=lambda cls: cls_counts[cls])
         fold_counts = [(f, fold_cls_counts[f, cls]) for f in range(n_folds)]
@@ -32,8 +32,9 @@ def make_folds(n_folds: int) -> pd.DataFrame:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--n-folds', type=int, default=5)
+    parser.add_argument('--seed', type=int, default=42)
     args = parser.parse_args()
-    df = make_folds(n_folds=args.n_folds)
+    df = make_folds(n_folds=args.n_folds, seed=args.seed)
     df.to_csv('folds.csv', index=None)
 
 
