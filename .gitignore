@@ -1,3 +1,4 @@
 /.build/script.py
 /data
 .idea
+.DS_Store
