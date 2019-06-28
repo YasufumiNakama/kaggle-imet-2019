@@ -7,7 +7,20 @@ from torch import nn
 from torch.nn import functional as F
 import torchvision.models as M
 
+from fastai.layers import AdaptiveConcatPool2d
+
 from .utils import ON_KAGGLE
+
+
+"""
+When you use AdaptiveConcatPool2d:
+(Before)
+    self.net.avg_pool = AvgPool()
+    self.net.last_linear = nn.Linear(self.net.last_linear.in_features, num_classes)
+(After)
+    self.net.avg_pool = AdaptiveConcatPool2d(1)
+    self.net.last_linear = nn.Linear(self.net.last_linear.in_features * 2, num_classes)
+"""
 
 
 class SEModule(nn.Module):
@@ -389,6 +402,7 @@ class SEResNeXt101_32x4d(nn.Module):
         return self.net(x)
 
 
+# Global Average Pooling same as nn.AdaptiveAvgPool2d(1) check https://www.xn--ebkc7kqd.com/entry/pytorch-pooling
 class AvgPool(nn.Module):
     def forward(self, x):
         return F.avg_pool2d(x, x.shape[2:])
