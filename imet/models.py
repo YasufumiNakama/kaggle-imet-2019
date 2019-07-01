@@ -1,6 +1,7 @@
 import math
 from collections import OrderedDict
 from functools import partial
+import re
 
 import torch
 from torch import nn
@@ -11,25 +12,21 @@ from fastai.layers import AdaptiveConcatPool2d
 
 from .utils import ON_KAGGLE
 
-
 """
 When you use AdaptiveConcatPool2d:
-
 (Before)
     self.net.avg_pool = AvgPool()
     self.net.last_linear = nn.Linear(self.net.last_linear.in_features, num_classes)
 (After)
     self.net.avg_pool = AdaptiveConcatPool2d(1)
     self.net.last_linear = nn.Linear(self.net.last_linear.in_features * 2, num_classes)
-    
-When you try 2nd-train:
 
+When you try 2nd-train:
 os.makedirs('../input/se_resnext50_32x4d')
 # 1st-train lr=1e-4
 # shutil.copy('../input/pytorch-pretrained-seresnet/se_resnext50_32x4d-a260b3a4.pth', '../input/se_resnext50_32x4d/se_resnext50_32x4d.pth')
 # 2nd-train & adjust lr=1e-5
 shutil.copy('../input/imet-weights/SEResNeXt50_32x4d_RandomRotate_1st_v42.pt', '../input/se_resnext50_32x4d/se_resnext50_32x4d.pth')
-
 class SEResNeXt50_32x4d(nn.Module):
     def __init__(self, num_classes, pretrained=False, dropout=False, net_cls=None):
         super().__init__()
@@ -42,10 +39,8 @@ class SEResNeXt50_32x4d(nn.Module):
         self.net.avg_pool = AvgPool()
         self.net.last_linear = nn.Linear(self.net.last_linear.in_features, num_classes)
         self.load_state_dict(torch.load(weights_path)['model'])
-
     def fresh_params(self):
         return self.net.last_linear.parameters()
-
     def forward(self, x):
         return self.net(x)
 """
@@ -77,6 +72,7 @@ class Bottleneck(nn.Module):
     """
     Base class for bottlenecks that implements `forward()` method.
     """
+
     def forward(self, x):
         residual = x
 
@@ -338,7 +334,7 @@ class SENet(nn.Module):
 class SEResNet50(nn.Module):
     def __init__(self, num_classes, pretrained=False, dropout=False, net_cls=None):
         super().__init__()
-        self.net = SENet(SEResNetBottleneck, [3,4,6,3], groups=1, reduction=16,
+        self.net = SENet(SEResNetBottleneck, [3, 4, 6, 3], groups=1, reduction=16,
                          dropout_p=None, inplanes=64, input_3x3=False,
                          downsample_kernel_size=1, downsample_padding=0,
                          num_classes=1000)
@@ -357,7 +353,7 @@ class SEResNet50(nn.Module):
 class SEResNet101(nn.Module):
     def __init__(self, num_classes, pretrained=False, dropout=False, net_cls=None):
         super().__init__()
-        self.net = SENet(SEResNetBottleneck, [3,4,23,3], groups=1, reduction=16,
+        self.net = SENet(SEResNetBottleneck, [3, 4, 23, 3], groups=1, reduction=16,
                          dropout_p=None, inplanes=64, input_3x3=False,
                          downsample_kernel_size=1, downsample_padding=0,
                          num_classes=1000)
@@ -376,7 +372,7 @@ class SEResNet101(nn.Module):
 class SEResNet152(nn.Module):
     def __init__(self, num_classes, pretrained=False, dropout=False, net_cls=None):
         super().__init__()
-        self.net = SENet(SEResNetBottleneck, [3,8,36,3], groups=1, reduction=16,
+        self.net = SENet(SEResNetBottleneck, [3, 8, 36, 3], groups=1, reduction=16,
                          dropout_p=None, inplanes=64, input_3x3=False,
                          downsample_kernel_size=1, downsample_padding=0,
                          num_classes=1000)
@@ -395,7 +391,7 @@ class SEResNet152(nn.Module):
 class SEResNeXt50_32x4d(nn.Module):
     def __init__(self, num_classes, pretrained=False, dropout=False, net_cls=None):
         super().__init__()
-        self.net = SENet(SEResNeXtBottleneck, [3,4,6,3], groups=32, reduction=16,
+        self.net = SENet(SEResNeXtBottleneck, [3, 4, 6, 3], groups=32, reduction=16,
                          dropout_p=None, inplanes=64, input_3x3=False,
                          downsample_kernel_size=1, downsample_padding=0,
                          num_classes=1000)
@@ -414,7 +410,7 @@ class SEResNeXt50_32x4d(nn.Module):
 class SEResNeXt101_32x4d(nn.Module):
     def __init__(self, num_classes, pretrained=False, dropout=False, net_cls=None):
         super().__init__()
-        self.net = SENet(SEResNeXtBottleneck, [3,4,23,3], groups=32, reduction=16,
+        self.net = SENet(SEResNeXtBottleneck, [3, 4, 23, 3], groups=32, reduction=16,
                          dropout_p=None, inplanes=64, input_3x3=False,
                          downsample_kernel_size=1, downsample_padding=0,
                          num_classes=1000)
